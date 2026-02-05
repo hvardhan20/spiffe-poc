@@ -1,0 +1,66 @@
+version: "3.9"
+
+# PoC: SPIRE Server + OIDC Discovery Provider + Postgres on a single EC2 host via Docker Compose.
+#
+# 1) Update spire/config/oidc.conf -> issuer = "http://<YOUR_EC2_PRIVATE_IP>"
+# 2) Bring up: docker compose up -d
+# 3) Validate:
+#    curl http://127.0.0.1/.well-known/openid-configuration
+#    curl http://127.0.0.1/keys
+#
+# Notes:
+# - This uses a local Postgres container with a mounted volume for persistence.
+# - SPIRE KeyManager is set to "memory" in server.conf for simplicity (keys reset on server restart).
+#   For a more stable PoC, swap to a persistent KeyManager plugin later.
+#
+services:
+  postgres:
+    image: postgres:16
+    container_name: spire-postgres
+    environment:
+      POSTGRES_DB: spire
+      POSTGRES_USER: spire
+      POSTGRES_PASSWORD: spire_pw_change_me
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [spire-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spire -d spire || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  spire-server:
+    image: ghcr.io/spiffe/spire-server:1.10.0
+    container_name: spire-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["-config", "/spire/conf/server.conf"]
+    ports:
+      - "8081:8081"   # SPIRE Server API (agents connect here)
+    volumes:
+      - spire_server_data:/spire/data
+      - ./spire/config:/spire/conf:ro
+    networks: [spire-net]
+    restart: unless-stopped
+
+  spire-oidc:
+    image: ghcr.io/spiffe/spire-oidc-discovery-provider:1.10.0
+    container_name: spire-oidc
+    depends_on:
+      - spire-server
+    command: ["-config", "/spire/conf/oidc.conf"]
+    ports:
+      - "80:80"       # OIDC discovery + JWKS (HTTP for PoC, private VPC)
+    volumes:
+      - ./spire/config:/spire/conf:ro
+    networks: [spire-net]
+    restart: unless-stopped
+
+networks:
+  spire-net:
+
+volumes:
+  pgdata:
+  spire_server_data:
