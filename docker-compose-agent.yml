@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  spire-agent:
+    image: ghcr.io/spiffe/spire-agent:1.10.0
+    container_name: spire-agent
+    command: ["-config", "/spire-agent/conf/agent.conf"]
+    volumes:
+      - ./agent/agent.conf:/spire-agent/conf/agent.conf:ro
+      - spire_agent_data:/spire-agent/data
+      - spire_agent_socket:/spire-agent/socket
+    restart: unless-stopped
+    networks: [poc-net]
+
+  caller:
+    build:
+      context: ./caller
+    container_name: spiffe-caller
+    depends_on:
+      - spire-agent
+    environment:
+      API_URL: "https://<api-id>.execute-api.us-east-1.amazonaws.com/<stage>/hello"
+      AUDIENCE: "api://poc"
+      WORKLOAD_SOCKET: "/spire-agent/socket/agent.sock"
+      PRINT_TOKEN: "false"
+      POLL_SECONDS: "15"
+    volumes:
+      - spire_agent_socket:/spire-agent/socket:ro
+    restart: unless-stopped
+    networks: [poc-net]
+
+networks:
+  poc-net:
+
+volumes:
+  spire_agent_data:
+  spire_agent_socket:
